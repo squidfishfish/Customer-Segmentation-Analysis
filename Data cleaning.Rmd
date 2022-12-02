@@ -1,0 +1,170 @@
+---
+title: "Data Cleaning"
+author: "YY"
+date: "4/08/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r,include=FALSE, message=FALSE, warning=FALSE}
+library(PoEdata); library(xtable); library(knitr); library("lmtest"); library(zoo);library(carData);library("sandwich");library(ggplot2);library(gridExtra);library(lmtest);library(readxl);library(car);library(stargazer);library(lattice);library(survival);library(Formula);library(nortest);library(foreign);library(nnet);library(reshape2);library(png);library(scales);library(dplyr);library(tidyr);library(latticeExtra); library(cowplot); library(lubridate);library(imputeTS); library(forecast);library(kableExtra); library(xtable); library(knitr); library("tidyr");library(tidyverse);library(broom);library(AER); library(systemfit);library(Formula);library(nortest);library(foreign);library(nnet);library(kableExtra);library(xtable);library(mfx); library(sampleSelection); library(prediction); library(ivregEX);library(censReg); library(truncreg); library(mfx);library(multcomp);library("RcmdrMisc");library(mlogit); library(dynlm);library(orcutt); library(nlWaldTest);library(pdfetch); library(TTR); library(tseries);library(kableExtra); library(truncreg);library(nlWaldTest); library(PoEdata); library(sampleSelection);  library(forecast); library(TTR); library(tseries); library(plm);library(skimr);library(pivottabler);library(pivottabler);library(lessR)
+```
+
+```{r,message=FALSE, warning=FALSE}
+#input two datasets
+online_retail_Year1011 <- read_excel("C:/Users/yueyu/Dropbox/PC/Desktop/BD620/Project/online_retail_II/online_retail_Year1011.xlsx")
+online_retail_Year0910 <- read_excel("C:/Users/yueyu/Dropbox/PC/Desktop/BD620/Project/online_retail_II/online_retail_Year0910.xlsx")
+```
+
+```{r,message=FALSE, warning=FALSE}
+#check the header
+names(online_retail_Year0910)
+names(online_retail_Year1011)
+```
+
+```{r,message=FALSE, warning=FALSE}
+#combine two datasets
+online_retail<-rbind(online_retail_Year0910, online_retail_Year1011)
+```
+
+```{r,message=FALSE, warning=FALSE}
+summary(online_retail)
+```
+
+```{r}
+colnames(online_retail) <- c("Invoice","StockCode", "Description", "Quantity", "InvoiceDate", "Price", "CustomerID", "Country")
+```
+
+```{r,message=FALSE, warning=FALSE}
+skim(online_retail)
+```
+summary: There are the summary about the dataset, 4 categorical variables, and 3 numerical data. Description and customer ID has missing value, Invoice unique data is 53628, stockcode unique data is 5304, description unique data is 5655, country unique data is 43. quantity is between -80995 to 80995, price between -53594 to 38970. Customer ID is number but this is categorical data. 
+
+After summary the data, we start to clean the data.
+```{r,message=FALSE, warning=FALSE}
+#Find duplicated data and remove
+N_online_retail<-distinct(online_retail)
+dim(N_online_retail)
+```
+Missing value: Description(4382), Customer ID(243007), customer ID missing percentage is 22.77%. The main idea of this analysis is to find out the pattern of the customer, we want to know the customer segmentation. So, customer ID is the most important variables to do the further analysis.
+```{r,message=FALSE, warning=FALSE}
+#This step is to omit the missing customer ID data. Using this dataset to do the further analysis.
+onlaine_retail_1 <-filter(N_online_retail,!is.na(N_online_retail$CustomerID))
+```
+
+```{r,message=FALSE, warning=FALSE}
+#Using new dataset to further clean data.This is the quantity boxplot, still has some outliers.Need to do further analysis.
+boxplot(online_retail_1$Quantity)
+```
+
+```{r,message=FALSE, warning=FALSE}
+#compare with the initial dataset, the price under 0 is omit, all of the price under 0 is missing the customer ID.
+boxplot(online_retail_1$Price)
+```
+
+```{r,message=FALSE, warning=FALSE}
+#let's see the negative price data, this is the for "adjust bad debt", so those data are useless for analysis the customer segmentation.There are a lot of products price equal to zero, we will keep those data, because maybe those for the Freebies.
+price_negative <-subset(online_retail,Price < 0)
+price_negative
+```
+Let see the why the quantity has the negative data?(after omit the Missing Customer ID)
+```{r,message=FALSE, warning=FALSE}
+Quantity_negative <-subset(online_retail_1,Quantity < 0)
+summary(Quantity_negative)
+```
+There are 18390 rows of data shows the quantity is negative value.And the negative number is from -1 to -80995.That's because those  transaction is all being cancelled. The invoice is start with letter"C".So,we decide to omit all those negative quantity data.
+```{r,message=FALSE, warning=FALSE}
+#omit negative quantity data.
+online_retail_2 <-subset(online_retail_1,Quantity >=0)
+summary(online_retail_2)
+```
+
+```{r,message=FALSE, warning=FALSE}
+#let see the quantity box plot again 
+boxplot(online_retail_2$Quantity)
+```
+For outliers, those product are paper, Tissues, MAGNETS something like that, very small things so the customer buy a large number of the quantity, that's make sense, so those are valid outliers we think.
+```{r,message=FALSE, warning=FALSE}
+boxplot(online_retail_2$Price)
+```
+Some of the big number price is come from "Manual", Stockcode is "M" So I sort all the 'Manual' things and try to find an explanation.
+But we think those outlier are actuall transaction, so those data are valid outliers, keep those data.
+
+
+There are 89% transaction happen in UK. other 11% happened in other countries.
+
+
+```{r}
+online_retail_2$Sales <- online_retail_2$Quantity*online_retail_2$Price
+head(online_retail_2)
+```
+
+```{r}
+#Creat a country, United Kingdom as 1, other country as 0, because most of transaction in United kingdom
+online_retail_2$UK <- ifelse(online_retail_2$Country == 'United Kingdom',1,0)
+head(online_retail_2)
+```
+
+```{r,include=FALSE, message=FALSE, warning=FALSE}
+#This is a pivot table for the every products of mean sales and transaction country. 
+table <- pivot(data=online_retail_2,mean,Sales,by=c(StockCode,UK))
+```
+
+
+According to the results, the sales and quantity has no relationship with whether the transaction in the UK, and quantity has higher realtionship with sales.
+
+```{r}
+table(grepl("^C", online_retail_1$Invoice))
+```
+
+```{r}
+online_retail_2_1 <- online_retail_2[!(online_retail_2$StockCode==" "),] 
+```
+How many transaction happened in each country?
+```{r}
+CC<-online_retail_2_1 %>% group_by(online_retail_2$Country)%>%summarise(n=n())%>%ungroup()%>%arrange()
+head(CC)
+```
+Country information
+```{r}
+table(online_retail_2_1$Country)
+```
+
+```{r}
+country <- table(online_retail_2_1$Country)
+plot(country)
+```
+We all have 5881 customers.
+```{r}
+n_distinct(online_retail_2_1$CustomerID)
+```
+we all have 4631 products in this websites.
+```{r}
+n_distinct(online_retail_2_1$StockCode)
+```
+
+```{r}
+#This is for correlation for the total sales, Whether the transaction is in the UK, and quantity. 
+Matrix <- cor(online_retail_2[c("Sales","UK","Quantity")])
+Matrix
+```
+According to the results, the sales and quantity has no relationship with whether the transaction in the UK, and quantity has higher realtionship with sales.
+
+```{r}
+scatterplotMatrix(Matrix,smooth = FALSE)
+```
+
+```{r}
+pairs(data=online_retail_2,
+    ~Quantity+Sales+UK)
+```
+
+
+
+
+
+

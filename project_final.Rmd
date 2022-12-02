@@ -1,0 +1,233 @@
+---
+title: "Final"
+author: "YY"
+date: "5/2/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r,include=FALSE, message=FALSE, warning=FALSE}
+library(PoEdata); library(xtable); library(knitr); library("lmtest"); library(zoo);library(carData);library("sandwich");library(ggplot2);library(gridExtra);library(lmtest);library(readxl);library(car);library(stargazer);library(lattice);library(survival);library(Formula);library(nortest);library(foreign);library(nnet);library(reshape2);library(png);library(scales);library(dplyr);library(tidyr);library(latticeExtra); library(cowplot); library(lubridate);library(imputeTS); library(forecast);library(kableExtra); library(xtable); library(knitr); library("tidyr");library(tidyverse);library(broom);library(AER); library(systemfit);library(Formula);library(nortest);library(foreign);library(nnet);library(kableExtra);library(xtable);library(mfx); library(sampleSelection); library(prediction); library(ivregEX);library(censReg); library(truncreg); library(mfx);library(multcomp);library("RcmdrMisc");library(mlogit); library(dynlm);library(orcutt); library(nlWaldTest);library(pdfetch); library(TTR); library(tseries);library(kableExtra); library(truncreg);library(nlWaldTest); library(PoEdata); library(sampleSelection);  library(forecast); library(TTR); library(tseries); library(plm);library(skimr);library(pivottabler);library(pivottabler);library(lessR)
+```
+
+```{r,message=FALSE, warning=FALSE}
+#input two datasets
+online_retail_Year1011 <- read_excel("C:/Users/yueyu/Dropbox/PC/Desktop/BD620/Project/online_retail_II/online_retail_Year1011.xlsx")
+online_retail_Year0910 <- read_excel("C:/Users/yueyu/Dropbox/PC/Desktop/BD620/Project/online_retail_II/online_retail_Year0910.xlsx")
+```
+
+```{r,message=FALSE, warning=FALSE}
+#check the header
+names(online_retail_Year0910)
+names(online_retail_Year1011)
+```
+
+```{r,message=FALSE, warning=FALSE}
+#combine two datasets
+online_retail<-rbind(online_retail_Year0910, online_retail_Year1011)
+```
+
+```{r,message=FALSE, warning=FALSE}
+summary(online_retail)
+```
+
+```{r}
+colnames(online_retail) <- c("Invoice","StockCode", "Description", "Quantity", "InvoiceDate", "Price", "CustomerID", "Country")
+```
+
+```{r,message=FALSE, warning=FALSE}
+#Find duplicated data and remove
+N_online_retail<-distinct(online_retail)
+dim(N_online_retail)
+```
+
+```{r,message=FALSE, warning=FALSE}
+#This step is to omit the missing customer ID data. Using this dataset to do the further analysis.
+online_retail_1 <-filter(N_online_retail,!is.na(N_online_retail$CustomerID))
+```
+
+```{r,message=FALSE, warning=FALSE}
+#omit negative quantity data.
+online_retail_2 <-subset(online_retail_1,Quantity >=0)
+summary(online_retail_2)
+```
+
+```{r}
+online_retail_2$Sales <- online_retail_2$Quantity*online_retail_2$Price
+head(online_retail_2)
+```
+
+```{r}
+#Creat a country, United Kingdom as 1, other country as 0, because most of transaction in United kingdom
+online_retail_2$UK <- ifelse(online_retail_2$Country == 'United Kingdom',1,0)
+head(online_retail_2)
+```
+
+```{r}
+online_retail_2$Date <- as_date(as.POSIXct(online_retail_2$InvoiceDate))
+head(online_retail_2)
+```
+
+#Customer segmentation, creat Recency, frequency and monitery.
+
+```{r,message=FALSE, warning=FALSE}
+RFM <- online_retail_2 %>%
+group_by(CustomerID) %>%
+summarise(Recency=as.numeric(as.Date('2012-01-01')-max(Date)),
+Frequency= n_distinct(Invoice), Monetary= sum(Sales))
+summary(RFM)
+```
+
+```{r}
+head(RFM)
+```
+Simple clustering
+```{r}
+Rank_R<-mutate(RFM, Recency_rank = ntile(RFM$Recency,4))
+head(Rank_R)
+Rank_R$Recncy_N <- 5-Rank_R$Recency_rank
+Rank_R <- subset(Rank_R,select=-c(Recency_rank))
+head(Rank_R)
+Rank_F <- mutate(Rank_R, Frequency_Score = ntile(Rank_R$Frequency,4))
+head(Rank_F)
+Rank_M <- mutate(Rank_F, Monetary_Score = ntile(Rank_F$Frequency,4))
+head(Rank_M)
+```
+
+```{r}
+Rank_M$Score <- Rank_M$Recncy_N+Rank_M$Frequency_Score+Rank_M$Monetary_Score
+head(Rank_M)
+```
+
+
+After grouping the customer score, I want to cluster the customer as three type. Gold, Silver, Bronze.
+```{r}
+Rank_M$segment <- ifelse(Rank_M$Score>9, "A", ifelse(Rank_M$Score>6 & Rank_M$Score<=9, "B", ifelse(Rank_M$Score>3 & Rank_M$Score<=6,"C","D")))
+head(Rank_M)
+```
+
+```{r}
+Rank_seg <- Rank_M %>% 
+  group_by(segment) %>% 
+  summarise(Recency_m = mean(Recency),
+            Frequency_m = mean(Frequency),
+            Monetary_m = mean(Monetary))
+Rank_seg
+```
+```{r}
+table(Rank_M$segment)
+```
+
+K-mean clustering
+choosing K
+```{r}
+RFM_scale <- scale(RFM[,2:4])
+head(RFM_scale)
+```
+
+After normalization, we need to decide value for ‘k’ to decide how many clustering our data will be. 
+```{r}
+wss <- function(RFM_scale, maxCluster = 9) {
+    SSw <- (nrow(RFM_scale) - 1) * sum(apply(RFM_scale, 2, var))
+    SSw <- vector()
+    set.seed(111)
+    for (i in 2:maxCluster) {
+        SSw[i] <- sum(kmeans(RFM_scale, centers = i)$withinss)
+    }
+    plot(1:maxCluster, SSw, type = "o", xlab = "Number of Clusters", ylab = "Within groups sum of squares", pch=19)
+}
+wss(RFM_scale)
+```
+This plot draw a curve is means that between “within the sum of squares” (WSS) and the number of clusters.So, according to these results, after the 4 cluster, because after the 4, the value of sum of squares are change slowly.
+
+Then chose the cluster as 4 to do further analysis.
+
+partition the data
+
+
+
+```{r}
+set.seed(111)
+rans <- sample(1:nrow(RFM), 0.6 * nrow(RFM)) 
+# Training set
+RFM_train <- RFM[rans,] 
+# Validation set
+RFM_valid <- RFM[-rans,]
+```
+
+```{r}
+RFM_k_mean_train <- kmeans(RFM_train,4)
+```
+
+```{r}
+RFM_train$cluster <- as.factor(RFM_k_mean_train$cluster)
+RFM_train
+```
+
+```{r}
+RFM_train_mean <- RFM_train %>% 
+  group_by(cluster) %>% 
+  summarise(Recency = mean(Recency),
+            Frequency = mean(Frequency),
+            Monetary = mean(Monetary))
+RFM_train_mean
+```
+
+```{r}
+RFM_k_mean_valid <- kmeans(RFM_valid,4)
+```
+
+```{r}
+RFM_valid$cluster <- as.factor(RFM_k_mean_valid$cluster)
+RFM_valid
+```
+
+```{r}
+RFM_valid_mean <- RFM_valid %>% 
+  group_by(cluster) %>% 
+  summarise(Recency = mean(Recency),
+            Frequency = mean(Frequency),
+            Monetary = mean(Monetary))
+RFM_valid_mean
+```
+
+
+
+```{r}
+
+```
+
+
+
+```{r}
+set.seed(111)
+RFM_k_mean <- kmeans(RFM_scale,4)
+```
+
+```{r}
+K_mean <- RFM
+head(K_mean)
+```
+
+```{r}
+K_mean$cluster <- as.factor(RFM_k_mean$cluster)
+K_mean
+```
+
+```{r}
+RFM_means <- K_mean %>% 
+  group_by(cluster) %>% 
+  summarise(Recency = mean(Recency),
+            Frequency = mean(Frequency),
+            Monetary = mean(Monetary))
+RFM_means
+```
+
+```{r}
+table(K_mean$cluster)
+```
+
